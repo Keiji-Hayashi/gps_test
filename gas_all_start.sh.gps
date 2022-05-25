@@ -1,0 +1,5 @@
+#!/bin/bash
+~/work/psoc/psoc_comm REQ_COOLER_OFF
+export DISPLAY=:0.0
+gnome-terminal -- bash -c "./gps_test -n"
+

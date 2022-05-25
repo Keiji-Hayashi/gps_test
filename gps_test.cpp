@@ -9,6 +9,7 @@
  * 
  */
 
+
 #include "ubx.hpp"
 #include "nmea_gga.hpp"
 #include "nmea_rmc.hpp"
@@ -22,8 +23,34 @@
 #include <random>
 #include <thread>
 #include <signal.h>
+#include <fstream>
 
 static std::atomic<bool> terminate(false);
+double MinimumLatitude = -90;
+double MaximumLatitude = 90;
+double MinimumLongitude = -180;
+double MaximumLongitude = 180;
+double MinimumAltitude = -1000;
+double MaximumAltitude = 10000;
+bool PositionError = false;
+bool LatitudeError = false;
+bool LongitudeError = false;
+bool AltitudeError = false;
+int PositionErrorCount = 0;
+int LatitudeErrorCount = 0;
+int LongitudeErrorCount = 0;
+int AltitudeErrorCount = 0;
+
+struct gps_test_param {
+    bool print_nmea;
+    bool print_sv;
+    gps_test_param() {
+        print_nmea = false;
+        print_sv = false;
+    }
+};
+
+void read_conf();
 
 /**
  * @brief ランダムな時間ウェイト(500ms ～ 1s)
@@ -90,13 +117,13 @@ std::string to_str(int value)
  * 
  * @param ok 
  */
-inline void print_result(bool ok) 
+inline std::string print_result(bool ok) 
 {
     if (ok == true) {
-        std::cout << "\033[32m[OK]\033[0m    ";
+        return "\033[32m[OK]   \033[0m";
     }
     else {
-        std::cout << "\033[31m[ERROR]\033[0m ";
+        return "\033[31m[ERROR]\033[0m";
     }
 }
 
@@ -107,12 +134,50 @@ inline void print_result(bool ok)
  */
 void print_utc(std::string gps_utc)
 {
+    std::cout << "\033[0K";
     if (gps_utc == "") {
-        std::cout << "Date Time (UTC) \033[31m[Error]\033[0m" << std::endl;
+        std::cout << "DateTime(UTC) \033[31m[ERROR]\033[0m";
     }
     else {
-        std::cout << "Date Time (UTC) " << gps_utc << std::endl;
+        std::cout << "DateTime(UTC) " << gps_utc;
     }
+    std::cout << std::endl;
+}
+
+void position_check(double latitude, double longitude, double altitude)
+{
+    if (!std::isnan(latitude) && latitude >= MinimumLatitude && latitude <= MaximumLatitude) {
+        LatitudeError = false;
+    }
+    else {
+        LatitudeError = true;
+        LatitudeErrorCount++;
+    }
+
+    if (!std::isnan(longitude) && longitude >= MinimumLongitude && longitude <= MaximumLongitude) {
+        LongitudeError = false;
+    }
+    else {
+        LongitudeError = true;
+        LongitudeErrorCount++;
+    }
+
+    if (!std::isnan(altitude) && altitude >= MinimumAltitude && altitude <= MaximumAltitude) {
+        AltitudeError = false;
+    }
+    else {
+        AltitudeError = true;
+        AltitudeErrorCount++;
+    }
+
+    if(LatitudeError == false && LongitudeError == false && AltitudeError == false) {
+        PositionError = false;
+    }
+    else {
+        PositionError = true;
+        PositionErrorCount++;
+    }
+
 }
 
 /**
@@ -123,53 +188,37 @@ void print_utc(std::string gps_utc)
  * @param altitude 
  * @param num_sv 
  */
-void print_gps_coordinates(double latitude, double longitude, double altitude, int num_sv)
+void print_gps_coordinates(double latitude, double longitude, double altitude)
 {
-    std::cout << "Latitude = ";
+    std::cout << "\033[0K";
+    std::cout << "LAT=";
     if (std::isnan(latitude)) {
-        std::cout << "\033[31m";
-        std::cout << std::left << std::setw(11) << "[ERROR]";
-        std::cout << "\033[0m";
+        std::cout << "-----------";
     }
     else {
         std::cout << std::right << std::setw(11) << std::fixed << std::setprecision(7) << latitude;
     }
-    std::cout << ", ";
+    std::cout << print_result(!LatitudeError) << ", ";
 
     // 経度を表示
-    std::cout << "Longitude = ";
+    std::cout << "LON=";
     if (std::isnan(longitude)) {
-        std::cout << "\033[31m";
-        std::cout << std::left << std::setw(11) << "[ERROR]";
-        std::cout << "\033[0m";
+        std::cout << "-----------";
     }
     else {
         std::cout << std::right << std::setw(11) << std::fixed << std::setprecision(7) << longitude;
     }
-    std::cout << ", ";
+    std::cout << print_result(!LongitudeError) << ", ";
 
     // 高度を表示
-    std::cout << "Altitude = ";
+    std::cout << "ALT=";
     if (std::isnan(altitude)) {
-        std::cout << "\033[31m";
-        std::cout << std::left << std::setw(8) << "[ERROR]";
-        std::cout << "\033[0m";
+        std::cout << "------";
     }
     else {
-        std::cout << std::right << std::setw(8) << std::fixed << std::setprecision(1) << altitude;
+        std::cout << std::setw(6) << std::fixed << std::setprecision(1) << altitude;
     }
-    std::cout << ", ";
-
-    std::cout << "num_sv = ";
-    if (num_sv < 0) {
-        std::cout << "\033[31m[ERROR]\033[0m";
-    }
-    else {
-        std::cout << num_sv;
-    }
-
-
-    std::cout << "\033[0K" << std::endl;
+    std::cout << print_result(!AltitudeError) << std::endl;
 }
 
 /**
@@ -181,39 +230,33 @@ void print_gps_coordinates(double latitude, double longitude, double altitude, i
  */
 void print_dop(double pdop, double hdop, double vdop)
 {
-    std::cout << "PDOP = ";
+    std::cout << "\033[0K";
+    std::cout << "PDOP=";
     if (std::isnan(pdop)) {
-        std::cout << "\033[31m";
-        std::cout << std::left << std::setw(5) << "[ERROR]";
-        std::cout << "\033[0m";
-
+        std::cout << "\033[31m[ERROR]\033[0m";
     }
     else {
-        std::cout << std::right << std::setw(5) << std::fixed << std::setprecision(2) << pdop;
+        std::cout << std::fixed << std::setprecision(2) << pdop;
     }
     std::cout << ", ";
 
-    std::cout << "HDOP = ";
+    std::cout << "HDOP=";
     if (std::isnan(hdop)) {
-        std::cout << "\033[31m";
-        std::cout << std::left << std::setw(5) << "[ERROR]";
-        std::cout << "\033[0m";
+        std::cout << "\033[31m[ERROR]\033[0m";
     }
     else {
-        std::cout << std::right << std::setw(5) << std::fixed << std::setprecision(2) << hdop;
+        std::cout << std::fixed << std::setprecision(2) << hdop;
     }
     std::cout << ", ";
 
-    std::cout << "VDOP = ";
+    std::cout << "VDOP=";
     if (std::isnan(vdop)){
-        std::cout << "\033[31m";
-        std::cout << std::left << std::setw(5) << "[ERROR]";
-        std::cout << "\033[0m";
+        std::cout << "\033[31m[ERROR]\033[0m";
     }
     else {
-        std::cout << std::right << std::setw(5) << std::fixed << std::setprecision(2) << vdop;
+        std::cout << std::fixed << std::setprecision(2) << vdop;
     }
-    std::cout << "\033[0K" << std::endl;
+    std::cout << std::endl;
 
 }
 
@@ -226,7 +269,8 @@ void print_dop(double pdop, double hdop, double vdop)
 void print_satellite_info(std::vector<nmea_gsa> gsa_list, std::vector<nmea_gsv> gsv_list)
 {
     int no = 0;
-    std::cout << "No.\tActive\tSat.ID\tEL.\tAZ.\tC/N0\tSignal" << "\033[0K" << std::endl;
+    std::cout << "\033[0K";
+    std::cout << "No.\tActive\tSat.ID\tEL.\tAZ.\tC/N0\tGNSS\t" << std::endl;
     for(auto gsv : gsv_list) {
         std::vector<int> svid_list = gsv.get_svid_list();
         std::string sys_str;
@@ -258,24 +302,24 @@ void print_satellite_info(std::vector<nmea_gsa> gsa_list, std::vector<nmea_gsv> 
                 }
             }
             nmea_gsv::sv_info si = gsv.get_svinfo(svid);
+            std::cout << "\033[0K";
             std::cout << std::right << std::setw(2) << no << "\t";
             std::cout << active << "\t";
             std::cout << std::right << std::setw(2) << si.svid << "\t";
             std::cout << std::right << std::setw(2) << to_str(si.elv) << "\t";
             std::cout << std::right << std::setw(3) << to_str(si.az) << "\t";
             std::cout << std::right << std::setw(2) << to_str(si.cno) << "\t";
-            std::cout << std::left << std::setw(8) << sys_str << "\033[0K" << std::endl;
+            std::cout << std::left << std::setw(8) << sys_str << std::endl;
             no++;
         }
     }
-    std::cout << "\033[0J" << std::endl;
 }
 
 /**
  * @brief メインのループ処理
  * 
  */
-static void loop_thread_proc()
+static void loop_thread_proc(gps_test_param param)
 {
     ubx ubx;
     bool sum_err = false;
@@ -289,6 +333,7 @@ static void loop_thread_proc()
     const double timeout_limit = 2000.0;
     std::string msg;
     std::vector<std::string> nmea;
+    bool update = false;
 
     std::cout << "\033[2J" << std::endl;
     while(!terminate) {
@@ -297,6 +342,11 @@ static void loop_thread_proc()
         if (elapsed >= timeout_limit && timeout == false) {
             timeout = true;
             timeout_cnt++;
+            update = true;
+            prev_time = curr_time;
+        }
+        else {
+            timeout = false;
         }
 
         std::vector<uint8_t> buf;
@@ -312,22 +362,7 @@ static void loop_thread_proc()
         }
 
         if(sts == ubx::empty && msg.size() > 0) {
-            curr_time = std::chrono::system_clock::now();
-            double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(curr_time - prev_time).count(); 
-            if (elapsed < timeout_limit) {
-                timeout = false;
-            }
             prev_time = curr_time;
-            std::string gps_utc = "";
-            double latitude = std::numeric_limits<double>::quiet_NaN();
-            double longitude = std::numeric_limits<double>::quiet_NaN();
-            double altitude = std::numeric_limits<double>::quiet_NaN();
-            int num_sv = 0;
-            time_t prev_gps_time_t = (time_t)-1;
-            time_t current_gps_time_t = (time_t)-1;
-            std::vector<nmea_gsa> gsa;
-            std::vector<nmea_gsv> gsv;
-            std::vector<nmea_gsv::sv_info> sv_list;
 
             nmea.clear();
             size_t pos;
@@ -338,20 +373,39 @@ static void loop_thread_proc()
                 nmea.push_back(sentence);
             }
             msg = "";
+            update = true;
+        }
+        if (update == true) {
+            update = false;
+            std::string gps_utc = "";
+            double latitude = std::numeric_limits<double>::quiet_NaN();
+            double longitude = std::numeric_limits<double>::quiet_NaN();
+            double altitude = std::numeric_limits<double>::quiet_NaN();
+            int num_sv = 0;
+            time_t prev_gps_time_t = (time_t)-1;
+            time_t current_gps_time_t = (time_t)-1;
+            std::vector<nmea_gsa> gsa;
+            std::vector<nmea_gsv> gsv;
+            std::vector<nmea_gsv::sv_info> sv_list;
             std::cout << "\033[0;0H";
             for (auto s : nmea) {
-                std::cout << s;
+                std::stringstream ss;
+                ss << s << " ";
                 if (check_sum(s) == false) {
                     // チェックサムエラー
                     sum_err = true;
                     sum_err_cnt++;
-                    print_result(false);
+                    ss << print_result(false);
                     continue;
                 }
                 else {
-                    print_result(true);
+                    ss << print_result(true);
                 }
-                std::cout << "\033[0K" << std::endl;
+                ss << "\033[0K" << std::endl;
+                // NMEA表示
+                if (param.print_nmea) {
+                    std::cout << ss.str();
+                }
 
                 if (s.find("RMC") != std::string::npos) {
                     nmea_rmc rmc(s);
@@ -393,26 +447,28 @@ static void loop_thread_proc()
                 prev_gps_time_t = current_gps_time_t;
             }
 
+            // GPS座標をチェック
+            position_check(latitude, longitude, altitude);
 
             // 表示
-            std::cout << "Checksum  ";
-            print_result(!sum_err);
+            std::cout << "Checksum  " << print_result(!sum_err);
             std::cout << "(error count = " << sum_err_cnt << ")\033[0K" << std::endl;
             
-            std::cout << "UTC check ";
-            print_result(!utc_err);
+            std::cout << "UTC check " << print_result(!utc_err);
             std::cout << "(error count = " << utc_err_cnt << ")\033[0K" << std::endl;
 
-            std::cout << "Timeout   ";
-            print_result(!timeout);
+            std::cout << "Position  " << print_result(!PositionError);
+            std::cout << "(error count = " << PositionErrorCount << ")\033[0K" << std::endl;
+
+            std::cout << "Timeout   " << print_result(!timeout);
             std::cout << "(error count = " << timeout_cnt << ")\033[0K" << std::endl;
 
-#if 1
+
             // 時刻を表示
             print_utc(gps_utc);
 
             // 緯度を表示
-            print_gps_coordinates(latitude, longitude, altitude, num_sv);
+            print_gps_coordinates(latitude, longitude, altitude);
 
             // DOP（精度）を表示
             double pdop = std::numeric_limits<double>::quiet_NaN();
@@ -423,12 +479,16 @@ static void loop_thread_proc()
                 hdop = gsa[0].get_hdop();
                 vdop = gsa[0].get_vdop();
             }
+            std::cout << "num_sv=" << num_sv << ", ";
+
             print_dop(pdop, hdop, vdop);
 
-            // 使用衛星の情報表示
-            print_satellite_info(gsa, gsv);
-#endif
-            std::cout << "\033[K";
+            if (param.print_sv) {
+                // 衛星の情報表示
+                print_satellite_info(gsa, gsv);
+            }
+            std::cout << "\033[0J";
+
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -441,14 +501,28 @@ static void loop_thread_proc()
  * 
  * @return int 
  */
-int main(void) 
+int main(int argc, char *argv[]) 
 {
     sigset_t ss = {0};
     int signo = 0;
+    gps_test_param param;
+    
+    for (int i = 1; i < argc; i++) {
+        if(argv[i][0] == '-') {
+            if (argv[i][1] == 'n') {
+                param.print_nmea = true;
+            }
+            if (argv[i][1] == 's') {
+                param.print_sv = true;
+            }
+        }
+    }
+
+    read_conf();
 
     // 無限ループを回避するためにメインのループを別スレッドにする。
     terminate.store(false);
-    std::thread loop_thread([]{loop_thread_proc();}) ;
+    std::thread loop_thread([param]{loop_thread_proc(param);}) ;
 
     // Ctrl+Cとkillを待つようにセット
     sigemptyset(&ss);
@@ -487,4 +561,68 @@ int main(void)
     return 0;
 }
 
+/**
+ * @brief 空白文字削除
+ * 
+ * @param str 文字列
+ * @param trim_character_list 削除対象の空白文字
+ * @return std::string 結果
+ */
+inline std::string trim(const std::string& str, const char* trim_character_list=" \t\v\r\n")
+{
+    std::string result = "";
+    // 左から最初の空白文字以外の文字を検索
+    auto left = str.find_first_not_of(trim_character_list);
+    if (left != std::string::npos) {
+        // すべて空白文字でなければ右から最後の空白文字以外の文字を検索 
+        auto right = str.find_last_not_of(trim_character_list);
+        // 左右の空白文字を除いた文字列を切り出す
+        result = str.substr(left, right - left + 1);
+    }
+    return result;
+}
 
+/**
+ * @brief 設定ファイル読み込み
+ * 
+ */
+void read_conf()
+{
+    std::ifstream ifs;
+    std::string filename = "gps_test.conf";
+    ifs.open(filename, std::ios::in);
+    std::string line;
+    while (std::getline(ifs, line)) {
+        // #以降はコメントなので削除
+        auto comment_pos = line.find("#");
+        if (comment_pos != std::string::npos) {
+            line = line.substr(0, comment_pos);
+        }
+
+        // '='があればKeyとValueへ分割
+        auto pos = line.find("=");
+        if (pos != std::string::npos) {
+            auto key = trim(line.substr(0, pos));
+            auto value = trim(line.substr(pos + 1));
+            if (key == "MinimumLatitude") {
+                MinimumLatitude = std::stod(value);
+            }
+            else if (key == "MaximumLatitude") {
+                MaximumLatitude = std::stod(value);
+            }
+            else if (key == "MinimumLongitude") {
+                MinimumLongitude = std::stod(value);
+            }
+            else if (key == "MaximumLongitude") {
+                MaximumLongitude = std::stod(value);
+            }
+            else if (key == "MinimumAltitude") {
+                MinimumAltitude = std::stod(value);
+            }
+            else if (key == "MaximumAltitude") {
+                MaximumAltitude = std::stod(value);
+            }
+        }
+    }
+
+}

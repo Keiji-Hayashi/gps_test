@@ -50,7 +50,7 @@ int8_t ubx::i2c_read(int32_t fd, uint8_t dev_addr, uint8_t reg_addr, uint8_t* da
 
     /* I2C-Readを行う. */
     if (ioctl(fd, I2C_RDWR, &ioctl_data) != 2) {
-        std::cerr << "i2c_read: failed to ioctl: " << std::strerror(errno) << std::endl;
+        //std::cerr << "i2c_read: failed to ioctl: " << std::strerror(errno) << std::endl;
         return -1;
     }
     return 0;
@@ -80,7 +80,7 @@ int8_t ubx::i2c_write(int32_t fd, uint8_t dev_addr, uint8_t reg_addr, const uint
 
     /* I2C-Writeを行う. */
     if (ioctl(fd, I2C_RDWR, &ioctl_data) != 1) {
-        std::cerr << "i2c_write: failed to ioctl: " << std::strerror(errno) << std::endl;
+        //std::cerr << "i2c_write: failed to ioctl: " << std::strerror(errno) << std::endl;
         return -1;
     }
     return 0;
